@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flight Route Simulator</title>
+    <meta charset='utf-8' />
+    <script
+        src='https://code.jquery.com/jquery-3.1.1.min.js'
+        integrity='sha256-hVVnYaiADRTO2PzUGmuLJr8BLUSjGIZsDYGmIJLv2b8='
+        crossorigin='anonymous'>
+    </script>
+    <link rel='stylesheet' href='https://unpkg.com/leaflet@1.0.2/dist/leaflet.css' />
+    <script src='https://unpkg.com/leaflet@1.0.2/dist/leaflet.js'></script>
+    <script src='/templates/js/leaflet.rotatedMarker.js'></script>
+    <style>
+        body {
+            padding: 0;
+            margin: 0;
+        }
+        html, body, #map {
+            height: 100%;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id='map'></div>
+
+    <script>
+        //Init LeafletJS
+        var map = L.map('map').fitWorld().setZoom(2);
+        var carrier_code = 'ETD';
+
+        //Set up tile layers
+        var earth = L.tileLayer('http://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', 
+            {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+                noWrap: true,
+                minZoom: 1         
+            });
+        var dark = L.tileLayer('http://{s}.tile.thunderforest.com/transport-dark/{z}/{x}/{y}.png', 
+            {
+                attribution: '&copy; <a href="http://www.thunderforest.com/"">Thunderforest</a>, &copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                noWrap: true,
+                minZoom: 1
+            });
+        var baseMaps = {
+            'Default View': dark,
+            'Earth View': earth,
+        };
+        L.control.layers(baseMaps).addTo(map);
+        dark.addTo(map); //Set Initial Tile on load
+
+        //Set up marker icons for planes
+        var icon_737 = L.icon({
+            iconUrl: 'templates/assets/airplane3.png',
+            iconSize: [64,64],
+            iconAnchor: [32,32]
+        });
+
+        //Main Logic
+        $(document).ready(function() {
+            var airborne_markers = {};
+            var flight_path = new L.Polyline([],{
+                color: 'red',
+                weight: 3,
+                opacity: 1,
+                smoothFactor: 1
+            });
+            flight_path.addTo(map);
+            function showTrack(e) {
+                var data = {   
+                    'aircraft_iata_number' : this.options.iata_number,
+                    'initial_departure_time' : this.options.initial_departure_time
+                }
+                $.getJSON('/api/flight/track', data, function(data){
+                    var pointList = [];
+                    for (var row in data) {
+                        pointList.push(new L.LatLng(data[row]["latitude"], data[row]["longitude"]));
+                    }
+                    flight_path.setLatLngs(pointList);
+                });
+            }
+
+            function callApi(){
+    
+                $.getJSON('/api/carrier/' + carrier_code, function(data) {
+                    for (var key in data['airborne']) {
+                        var row = data['airborne'][key];
+                        //console.log(row);
+                        //set lat long
+                        if (row['latitude'] && row['longitude']) {
+                            if (!airborne_markers[key]) {
+                                airborne_markers[key] = L.marker([row['latitude'], row['longitude']], {icon: icon_737, iata_number: key, initial_departure_time: row['initial_departure_time']}).addTo(map).on('click', showTrack);
+                            } else {
+                                var newLatLng = new L.LatLng(row['latitude'], row['longitude']);
+                                airborne_markers[key] .setLatLng(newLatLng); 
+                            }
+                        }
+                        if (row['heading'] && airborne_markers[key]) {
+                            airborne_markers[key].setRotationAngle(row['heading']);
+                        }
+                        if (airborne_markers[key]) {
+                            var $lat = row['latitude'] ? row['latitude'] : 'N/A';
+                            var $lon = row['longitude'] ? row['longitude'] : 'N/A';
+                            var $alt = row['altitude'] ? row['altitude'] + ' Feet' : 'N/A';
+                            var $heading = row['heading'] ? row['heading'] + '&deg;' : 'N/A';
+                            airborne_markers[key].bindPopup(
+                                'Flight: ' + row['icao_number'] 
+                                + ' (' + row['iata_number'] + ')<br>'
+                                + 'Origin: ' + row['departure_airport_code'] + '<br>'
+                                + 'Destination: ' + row['arrival_airport_code'] + '<br>' 
+                                + 'Position: ' + $lat + ' ' + $lon + '<br>'
+                                + 'Altitude: ' + $alt + '<br>' 
+                                + 'Heading: ' + $heading
+                            );
+                        }
+                    }
+                });
+            }
+            //call once on ready
+            callApi();
+
+            //Set up timer 
+            setInterval(callApi, 10000);
+    
+        });
+
+    </script>
+</body>
+</html>
